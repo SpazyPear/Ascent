@@ -10,8 +10,8 @@
 UENUM(BlueprintType)
 enum class ERoomType : uint8
 {
-	Undetermined,
-	UninitialisedRoom,
+	Undetermined UMETA(DisplayName = "Undetermined"),
+	UninitialisedRoom UMETA(DisplayName = "UninitialisedRoom"),
 	Spawn UMETA(DisplayName = "Spawn"),
 	Boss UMETA(DisplayName = "Boss"),
 	Treasure UMETA(DisplayName = "Treasure"),
@@ -56,6 +56,9 @@ public:
 
 	UPROPERTY(EditAnywhere)
 		TMap<ERoomType, TSubclassOf<URoom>> RoomBPs;
+
+	UPROPERTY(EditAnywhere)
+		TMap<ERoomType, uint32> RoomSizes;
 
 	UPROPERTY(EditAnywhere)
 		TMap<ERoomType, float> RoomTypeWeights;

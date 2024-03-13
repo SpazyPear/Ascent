@@ -37,7 +37,7 @@ public:
 	TArray<FRoomTile*> Neighbours;
 	TArray<ERoomType> PossibleRoomTypes;
 	float Entropy;
-	bool Collapsed;
+	bool bCollapsed;
 	FVector2D GridPos;
 	FLayoutRules& LayoutRules;
 
@@ -47,13 +47,24 @@ public:
 		this->LayoutRules = InLayoutRules;
 		this->GridPos = GridPos;
 		Entropy = 0;
-		PossibleRoomTypes = TArray<ERoomType> { ERoomType::Spawn, ERoomType::AscentPoint, ERoomType::Normal, ERoomType::Treasure, ERoomType::Boss };
-		Collapsed = false;
+		PossibleRoomTypes.Add(ERoomType::Treasure);
+		PossibleRoomTypes.Add(ERoomType::Boss);
+		PossibleRoomTypes.Add(ERoomType::Normal);
+		PossibleRoomTypes.Add(ERoomType::AscentPoint);
+		PossibleRoomTypes.Add(ERoomType::Spawn);
+
+		bCollapsed = false;
 
 		// WFC requires the room types to be sorted by their weights in decending order
 		PossibleRoomTypes.Sort([InLayoutRules](const ERoomType& A, const ERoomType& B) {
 			return InLayoutRules.RoomTypeWeights.FindRef(A) > InLayoutRules.RoomTypeWeights.FindRef(B);
 		});
+	}
+
+	void Collapse(ERoomType RoomType)
+	{
+		bCollapsed = true;
+		PossibleRoomTypes = TArray<ERoomType> { RoomType };
 	}
 
 	void RecalculateEntropy()
@@ -154,11 +165,14 @@ public:
 	UPROPERTY(EditAnywhere)
 		uint8 TargetDensity;
 
+	UPROPERTY(EditAnywhere)
+		uint8 PlayerCount;
+
 	UPROPERTY(EditAnywhere, meta=(ClampMin="0", ClampMax="1"))
 		float AdditionalCorridorChance;
 
 	UPROPERTY(EditAnywhere)
-		bool Debug;
+		bool bDebug;
 
 	UFUNCTION(BlueprintCallable)
 		void GenerateMap();
@@ -172,6 +186,7 @@ private:
 	void PlacePoints(TArray<FDPoint>& Points);
 	void TriangulateLinks(TArray<FDPoint>& Points, OUT TMap<FDPoint, TArray<FDPoint>>& Adjacencies);
 	void DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Adjacencies);
-	void PushRoomsApart();
+	bool CollapseNeighbours(FRoomTile& Tile, uint8& bCollapsed);
+	void SizeRooms();
 	void BuildLinks();
 };

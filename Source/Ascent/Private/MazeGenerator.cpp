@@ -155,18 +155,55 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 	// Use wave function collapse to determine room types
 
 	TArray<FRoomTile*> RoomTiles;
-	RoomTiles.Init(nullptr, RoomAdjacency.Num());
-	for (const auto& Point : RoomAdjacency)
+	for (int x = 0; x < RoomAdjacency.Num(); x++)
 	{
-		FRoomTile RoomData = FRoomTile(Point.Key.Id, FVector2D(Point.Key.X, Point.Key.Y), LayoutRules);
-		RoomTiles[Point.Key.Id] = &RoomData;
+		RoomTiles.Add(new FRoomTile(x, FVector2D(0, 0), LayoutRules));
 	}
 
+	for (const auto& Point : RoomAdjacency)
+	{
+		RoomTiles[Point.Key.Id] = new FRoomTile(Point.Key.Id, FVector2D(Point.Key.X, Point.Key.Y), LayoutRules);;
+	}
+
+	// Assign adjacancies to room tiles
 	for (const auto& Point : RoomAdjacency)
 		for (const FDPoint& AdjacentPoint : Point.Value)
 		{
 			RoomTiles[Point.Key.Id]->Neighbours.Add(RoomTiles[AdjacentPoint.Id]);
 		}
+
+	int32 CollapsedRooms = 0;
+
+	//Place spawns first. Then calculate initial entropies
+	for (int x = 0; x < PlayerCount; x++)
+	{
+		uint8 Index = 0;
+
+		// Find a node that allows for a spawn point
+		uint8 Attempts = 0;
+		while (Attempts < 20)
+		{
+			Attempts++;
+			Index = FMath::RandRange(0, RoomTiles.Num() - 1);
+			if (!RoomTiles[Index]->bCollapsed && RoomTiles[Index]->PossibleRoomTypes.Contains(ERoomType::Spawn))
+			{
+				break;
+			}
+		}
+
+		RoomTiles[Index]->Collapse(ERoomType::Spawn);
+		uint8 NeighboursCollapsed = 0;
+		if (!CollapseNeighbours(*RoomTiles[Index], NeighboursCollapsed)) return;
+		CollapsedRooms += NeighboursCollapsed;
+	}
+
+	// Spawns have been placed, remove them from the possible room types
+	for (auto& Room : RoomTiles)
+	{
+		if (!Room->bCollapsed)
+			Room->PossibleRoomTypes.Remove(ERoomType::Spawn);
+	}
+
 
 	// Initially they're all the same, no need to recalculate all of them.
 	RoomTiles[0]->RecalculateEntropy();
@@ -174,11 +211,8 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 	{
 		Room->Entropy = RoomTiles[0]->Entropy;
 	}
-
-	//Place spawns now? Then calculate initial entropies
 	
 	int32 NextIndex = FMath::RandRange(0, RoomDataCollection.Num() - 1);
-	int32 CollapsedRooms = 0;
 	while (CollapsedRooms != RoomTiles.Num())
 	{
 		// Collapse tile randomly based on room weights
@@ -193,44 +227,20 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 			PossibilityIndex++;
 			if (Roll <= 0 || PossibilityIndex >= Next->PossibleRoomTypes.Num())
 			{
-				Next->PossibleRoomTypes = TArray<ERoomType> { RoomType };
-				Next->Collapsed = true;
+				Next->Collapse(RoomType);
 				CollapsedRooms++;
 				break;
 			}
 		}
 
-		ERoomType CollapsedRoomType = Next->PossibleRoomTypes[0];
-		Next->Collapsed = true;
-
-		//Update neighbours
-		for (auto& Neighbour : Next->Neighbours)
-		{
-			for (ERoomType NeighbourOption : Neighbour->PossibleRoomTypes)
-			{
-				if (!LayoutRules.RoomEntropy[NeighbourOption].Possibilities.Find(CollapsedRoomType))
-				{
-					Neighbour->PossibleRoomTypes.Remove(NeighbourOption);
-
-					if (Neighbour->PossibleRoomTypes.Num() == 1)
-					{
-						Neighbour->Collapsed = true;
-						CollapsedRooms++;
-						break;
-					}
-					else if (Neighbour->PossibleRoomTypes.Num() == 0)
-					{
-						UE_LOG(LogTemp, Error, TEXT("No possible room types. WFC failed."))
-					}
-				}
-			}
-			Neighbour->RecalculateEntropy();
-		}
+		uint8 NeighboursCollapsed = 0;
+		if (!CollapseNeighbours(*Next, NeighboursCollapsed)) return;
+		CollapsedRooms += NeighboursCollapsed;
 
 		//Set next as the room with the lowest entropy
 		for (int32 i = 0; i < RoomTiles.Num(); i++)
 		{
-			if (RoomTiles[i]->Collapsed) continue;
+			if (RoomTiles[i]->bCollapsed) continue;
 			if (RoomTiles[i]->Entropy < RoomTiles[NextIndex]->Entropy)
 			{
 				NextIndex = i;
@@ -238,7 +248,7 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 		}
 	}
 
-	//Construct room data from tiles
+	// Construct room data from tiles
 	for (auto& Room : RoomTiles)
 	{
 		FRoomData Data;
@@ -248,11 +258,11 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 		Data.Position = FVector(Data.GridPos.X * CellSize, Data.GridPos.Y * CellSize, 0.f);
 		RoomDataCollection.Add(&Data);
 
-		if (Debug)
+		if (bDebug)
 		{
 			const TMap<ERoomType, FColor> RoomTypeColours = {
-				{ ERoomType::Spawn, FColor::Green },
-				{ ERoomType::Boss, FColor::Red },
+				{ ERoomType::Spawn, FColor::Magenta },
+				{ ERoomType::Boss, FColor::Orange },
 				{ ERoomType::Treasure, FColor::Yellow },
 				{ ERoomType::Normal, FColor::White },
 				{ ERoomType::AscentPoint, FColor::Blue },
@@ -262,18 +272,52 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 				this
 				, Data.Position
 				, FVector(300, 300, 0.f)
-				, RoomTypeColours[Data.RoomType]
+				, RoomTypeColours.FindRef(Data.RoomType)
 				, FRotator::ZeroRotator
 				, 500.f
 			);
 		}
 	}
-
-
 }
 
-void AMazeGenerator::PushRoomsApart()
+bool AMazeGenerator::CollapseNeighbours(FRoomTile& Tile, uint8& bCollapsed)
 {
+	uint8 CollapsedRooms = 0;
+	// Update neighbours
+	for (auto& Neighbour : Tile.Neighbours)
+	{
+		if (Neighbour->bCollapsed) continue;
+		for (int x = Neighbour->PossibleRoomTypes.Num() - 1; x >= 0; x--)
+		{
+			ERoomType NeighbourOption = Neighbour->PossibleRoomTypes[x];
+			if (!LayoutRules.RoomEntropy.FindRef(NeighbourOption).Possibilities.Contains(Tile.PossibleRoomTypes[0]))
+			{
+				Neighbour->PossibleRoomTypes.RemoveAt(x);
+			}
+		}
+
+		Neighbour->RecalculateEntropy();
+
+		// If the neighbour only has one possible room type left, collapse it
+		if (Neighbour->PossibleRoomTypes.Num() == 1)
+		{
+			Neighbour->bCollapsed = true;
+			CollapsedRooms++;
+			break;
+		}
+		// If the neighbour has no possible room types left, WFC has failed
+		else if (Neighbour->PossibleRoomTypes.Num() == 0)
+		{
+			UE_LOG(LogTemp, Error, TEXT("No possible room types. WFC failed."));
+			return false;
+		}
+	}
+	return true;
+}
+
+void AMazeGenerator::SizeRooms()
+{
+
 }
 
 void AMazeGenerator::BuildLinks()
