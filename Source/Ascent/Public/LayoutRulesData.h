@@ -11,7 +11,7 @@
  * 
  */
 UCLASS()
-class ASCENT_API ULayoutRulesData : public UDataAsset
+class ASCENT_API ULayoutRulesData : public UPrimaryDataAsset
 {
 	GENERATED_BODY()
 	

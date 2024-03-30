@@ -189,7 +189,7 @@ private:
 	bool CollapseNeighbours(FRoomTile& Tile, uint8& bCollapsed);
 	bool ForcePlaceRoom(ERoomType RoomType, TArray<FRoomTile>& RoomTiles, uint8& CollapsedRooms, uint8& CollapsedIndex);
 	void SizeRooms();
-	bool MoveRoomOnGrid(FRoomData* Tile, FVector2D NewGridPos);
+	bool MoveRoomOnGrid(FRoomData* Tile, FVector2D NewGridPos, Grid<TArray<FRoomData*>>& Grid);
 	int32 RoundToOdd(int32 Value);
 	void BuildLinks();
 };

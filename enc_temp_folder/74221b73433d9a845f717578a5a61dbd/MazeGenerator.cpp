@@ -100,17 +100,14 @@ void AMazeGenerator::TriangulateLinks(TArray<FDPoint>& Points, OUT TMap<FDPoint,
 			RawAdjacencies[Edge.P1].AddUnique(Edge);
 			RawAdjacencies[Edge.P2].AddUnique(FDEdge::GetInverted(Edge));
 
-			if (bDebug)
-			{
-				//UKismetSystemLibrary::DrawDebugLine(
-				//	this
-				//	, FVector(Edge.P1.X * CellSize, Edge.P1.Y * CellSize, 0.f)
-				//	, FVector(Edge.P2.X * CellSize, Edge.P2.Y * CellSize, 0.f)
-				//	, FColor::Red
-				//	, 500.f
-				//	, 8.f
-				//);
-			}
+			UKismetSystemLibrary::DrawDebugLine(
+				this
+				, FVector(Edge.P1.X * CellSize, Edge.P1.Y * CellSize, 0.f)
+				, FVector(Edge.P2.X * CellSize, Edge.P2.Y * CellSize, 0.f)
+				, FColor::Red
+				, 500.f
+				, 8.f
+			);
 		}
 	}
 
@@ -218,13 +215,11 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 		if (!bSuccess) continue;
 
 		// Remove links to the ascent point that isn't the boss room
-		for (int X = RoomTiles[AscentPointIndex].Neighbours.Num() - 1; X >= 0; X--)
+		for (auto& Neighbour : RoomTiles[AscentPointIndex].Neighbours)
 		{
-			FRoomTile* Neighbour = RoomTiles[AscentPointIndex].Neighbours[X];
 			if (Neighbour->Id != BossIndex)
 			{
 				Neighbour->Neighbours.Remove(&RoomTiles[AscentPointIndex]);
-				RoomTiles[AscentPointIndex].Neighbours.RemoveAt(X);
 			}
 		}
 		
@@ -317,9 +312,29 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 		Data->GridPos = Room.GridPos;
 		Data->Position = FVector(Data->GridPos.X * CellSize, Data->GridPos.Y * CellSize, 0.f);
 		RoomDataCollection.Add(Data);
+
+		if (bDebug)
+		{
+			const TMap<ERoomType, FColor> RoomTypeColours = {
+				{ ERoomType::Spawn, FColor::Magenta },
+				{ ERoomType::Boss, FColor::Orange },
+				{ ERoomType::Treasure, FColor::Yellow },
+				{ ERoomType::Normal, FColor::White },
+				{ ERoomType::AscentPoint, FColor::Blue },
+			};
+
+			UKismetSystemLibrary::DrawDebugBox(
+				this
+				, Data->Position
+				, FVector(300, 300, 0.f)
+				, RoomTypeColours.FindRef(Data->RoomType)
+				, FRotator::ZeroRotator
+				, 500.f
+			);
+		}
 	}
 
-	SizeRooms();
+	//SizeRooms();
 }
 
 bool AMazeGenerator::ForcePlaceRoom(ERoomType RoomType, TArray<FRoomTile>& RoomTiles, uint8& CollapsedRooms, uint8& CollapsedIndex)
@@ -383,21 +398,25 @@ bool AMazeGenerator::CollapseNeighbours(FRoomTile& Tile, uint8& CollapsedRooms)
 
 void AMazeGenerator::SizeRooms()
 {
-	UE_LOG(LogTemp, Warning, TEXT("Initial set"))
-		// Assign room sizes
-		for (FRoomData* Room : RoomDataCollection)
-		{
-			F2DRange& Corners = Room->Corners;
-			const F2DRange& RoomSizeRange = LayoutRules.RoomSizes[Room->RoomType];
-			uint32 RoomLength = RoundToOdd(FMath::RandRange(RoomSizeRange.MinX, RoomSizeRange.MaxX));
-			uint32 RoomWidth = RoundToOdd(FMath::RandRange(RoomSizeRange.MinY, RoomSizeRange.MaxY));
-			Corners.MinX = FMath::Clamp(Room->GridPos.X - ((RoomLength / 2)), 0, Length);
-			Corners.MaxX = FMath::Clamp(Room->GridPos.X + ((RoomLength / 2)), 0, Length);
-			Corners.MinY = FMath::Clamp(Room->GridPos.Y - ((RoomWidth / 2)), 0, Width);
-			Corners.MaxY = FMath::Clamp(Room->GridPos.Y + ((RoomWidth / 2)), 0, Width);
+	Grid<TArray<FRoomData*>> OverlapGrid = Grid<TArray<FRoomData*>>(Length, Width);
 
-			MoveRoomOnGrid(Room, Room->GridPos);
-		}
+	UE_LOG(LogTemp, Warning, TEXT("Initial set"))
+	// Assign room sizes
+	for (FRoomData* Room : RoomDataCollection)
+	{
+		F2DRange& Corners = Room->Corners;
+		const F2DRange& RoomSizeRange = LayoutRules.RoomSizes[Room->RoomType];
+		uint32 RoomLength = RoundToOdd(FMath::RandRange(RoomSizeRange.MinX, RoomSizeRange.MaxX));
+		uint32 RoomWidth = RoundToOdd(FMath::RandRange(RoomSizeRange.MinY, RoomSizeRange.MaxY));
+		Corners.MinX = FMath::Clamp(Room->GridPos.X - ((RoomLength / 2)), 0, Length);
+		Corners.MaxX = FMath::Clamp(Room->GridPos.X + ((RoomLength / 2)), 0, Length);
+		Corners.MinY = FMath::Clamp(Room->GridPos.Y - ((RoomWidth / 2)), 0, Width);
+		Corners.MaxY = FMath::Clamp(Room->GridPos.Y + ((RoomWidth / 2)), 0, Width);
+
+		MoveRoomOnGrid(Room, Room->GridPos, OverlapGrid);
+	}
+
+	//if (bDebug)
 
 	uint32 GridLength = Length;
 	uint32 GridWidth = Width;
@@ -412,78 +431,57 @@ void AMazeGenerator::SizeRooms()
 	// Sort by closest to the middle of the clump
 	RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
 		return FVector2D::Distance(A.GridPos, AveragePos) < FVector2D::Distance(B.GridPos, AveragePos);
-		});
-
-	if (bDebug)
-	{
-		// Pre move rooms apart
-		//for (auto& Data : RoomDataCollection)
-		//{
-
-		//	const TMap<ERoomType, FColor> RoomTypeColours = {
-		//		{ ERoomType::Spawn, FColor::Magenta },
-		//		{ ERoomType::Boss, FColor::Orange },
-		//		{ ERoomType::Treasure, FColor::Yellow },
-		//		{ ERoomType::Normal, FColor::White },
-		//		{ ERoomType::AscentPoint, FColor::Blue },
-		//	};
-
-		//	UKismetSystemLibrary::DrawDebugBox(
-		//		this
-		//		, Data->Position
-		//		, FVector((Data->Corners.MaxX - Data->Corners.MinX) * CellSize, (Data->Corners.MaxY - Data->Corners.MinY) * CellSize, 0.f)
-		//		, RoomTypeColours.FindRef(Data->RoomType)
-		//		, FRotator(0, 45, 0)
-		//		, 500.f
-		//	);
-
-		//}
-	}
+	});
 
 	// Move overlapping rooms out towards the edges, from the middle outwards
 	bool bOverlapsExist = true;
 	uint8 Attempts = 0;
-	const uint8 MIN_SPACING = 10;
-	const uint8 MAX_ATTEMPTS = 15;
+	const uint8 MIN_SPACING = 5;
+	const uint8 MAX_ATTEMPTS = 50;
 	UE_LOG(LogTemp, Warning, TEXT("Overlap checks"))
 
 	while (bOverlapsExist && Attempts < MAX_ATTEMPTS)
 	{
 		bOverlapsExist = false;
-		for (auto& RoomOne : RoomDataCollection)
+		for (auto& Room : RoomDataCollection)
 		{
-			for (auto& RoomTwo : RoomDataCollection)
+			for (int X = Room->Corners.MinX; X <= Room->Corners.MaxX; X++)
 			{
-				if (RoomOne != RoomTwo && 
-					RoomOne->GridPos.X < RoomTwo->GridPos.X + RoomTwo->Corners.Length() &&
-					RoomOne->GridPos.X + RoomOne->Corners.Length() > RoomTwo->GridPos.X &&
-					RoomOne->GridPos.Y < RoomTwo->GridPos.Y + RoomTwo->Corners.Width() &&
-					RoomOne->GridPos.Y + RoomOne->Corners.Width() > RoomTwo->GridPos.Y)
+				for (int Y = Room->Corners.MinY; Y <= Room->Corners.MaxY; Y++)
 				{
-					bOverlapsExist = true;
+					if (X < 0 || X >= Length || Y < 0 || Y >= Width) continue;
+					if (OverlapGrid[X][Y].Num() > 1)
+					{
+						bOverlapsExist = true;
 
-					int MaxLength = FMath::Max(RoomOne->Corners.MaxX - RoomOne->Corners.MinX, RoomTwo->Corners.MaxX - RoomTwo->Corners.MinX);
-					int MaxWidth = FMath::Max(RoomOne->Corners.MaxY - RoomOne->Corners.MinY, RoomTwo->Corners.MaxY - RoomTwo->Corners.MinY);
+						// Move overlapping rooms outwards
+						for (int i = OverlapGrid[X][Y].Num() - 1; i >= 0; i--)
+						{
+							FRoomData* OverlappingRoom = OverlapGrid[X][Y][i];
+							if (OverlappingRoom == Room) continue;
 
-					int XDistance = RoomTwo->GridPos.X - RoomOne->GridPos.X;
-					int YDistance = RoomTwo->GridPos.Y - RoomOne->GridPos.Y;
-					int TranslationX = ((MaxLength) - FMath::Abs(XDistance)) * FMath::Sign(XDistance);
-					int TranslationY = ((MaxWidth) - FMath::Abs(YDistance)) * FMath::Sign(YDistance);
+							int MaxLength = FMath::Max(Room->Corners.MaxX - Room->Corners.MinX, OverlappingRoom->Corners.MaxX - OverlappingRoom->Corners.MinX);
+							int MaxWidth = FMath::Max(Room->Corners.MaxY - Room->Corners.MinY, OverlappingRoom->Corners.MaxY - OverlappingRoom->Corners.MinY);
 
-					MoveRoomOnGrid(RoomTwo, RoomTwo->GridPos + FVector2D(TranslationX, TranslationY));
+							int XDistance = OverlappingRoom->GridPos.X - Room->GridPos.X;
+							int YDistance = OverlappingRoom->GridPos.Y - Room->GridPos.Y;
+							int TranslationX = ((MaxLength / 2) - FMath::Abs(XDistance)) * FMath::Sign(XDistance);
+							int TranslationY = ((MaxWidth / 2) - FMath::Abs(YDistance)) * FMath::Sign(YDistance);
+							MoveRoomOnGrid(OverlappingRoom, OverlappingRoom->GridPos + FVector2D(TranslationX, TranslationY), OverlapGrid);
 
-					RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
-						return FVector2D::Distance(A.GridPos, AveragePos) < FVector2D::Distance(B.GridPos, AveragePos);
-						});
-						
+							RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
+								return FVector2D::Distance(A.GridPos, AveragePos) < FVector2D::Distance(B.GridPos, AveragePos);
+								});
+						}
+					}
 				}
-				
 			}
 		}
 		Attempts++;
+		if (!bOverlapsExist) break;
 	}
 
-	if (bOverlapsExist || Attempts >= MAX_ATTEMPTS)
+	if (bOverlapsExist)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Failed to move rooms apart."));
 	}
@@ -503,7 +501,7 @@ void AMazeGenerator::SizeRooms()
 			UKismetSystemLibrary::DrawDebugBox(
 				this
 				, Data->Position
-				, FVector((Data->Corners.Length()) * CellSize / 2, (Data->Corners.Width()) * CellSize / 2, 0.f)
+				, FVector((Data->Corners.MaxX - Data->Corners.MinX) * CellSize, (Data->Corners.MaxY - Data->Corners.MinY) * CellSize, 0.f)
 				, RoomTypeColours.FindRef(Data->RoomType)
 				, FRotator::ZeroRotator
 				, 500.f
@@ -513,12 +511,26 @@ void AMazeGenerator::SizeRooms()
 	}
 }
 
-bool AMazeGenerator::MoveRoomOnGrid(FRoomData* Tile, FVector2D NewGridPos)
+bool AMazeGenerator::MoveRoomOnGrid(FRoomData* Tile, FVector2D NewGridPos, Grid<TArray<FRoomData*>>& Grid)
 {
 	uint32 RoomLength = Tile->Corners.MaxX - Tile->Corners.MinX;
 	uint32 RoomWidth = Tile->Corners.MaxY - Tile->Corners.MinY;
 
-	UE_LOG(LogTemp, Warning, TEXT("Moved room from %f %f to %f %f"), Tile->GridPos.X, Tile->GridPos.Y, NewGridPos.X, NewGridPos.Y)
+	if (NewGridPos.X - RoomLength < 0 || NewGridPos.X + RoomLength >= Grid.GetLength(0) || NewGridPos.Y - RoomWidth < 0 || NewGridPos.Y + RoomWidth >= Grid.GetLength(1))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Failed to move room out of bounds."))
+		return false;
+	}
+
+	for (int X = Tile->Corners.MinX; X <= Tile->Corners.MaxX; X++)
+	{
+		for (int Y = Tile->Corners.MinY; Y <= Tile->Corners.MaxY; Y++)
+		{
+			Grid[X][Y].Remove(Tile);
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Moved room from %d %d to %d %d"), Tile->GridPos.X, Tile->GridPos.Y, NewGridPos.X, NewGridPos.Y)
 	Tile->GridPos = NewGridPos;
 	Tile->Position = FVector(Tile->GridPos.X * CellSize, Tile->GridPos.Y * CellSize, 0.f);
 
@@ -527,6 +539,26 @@ bool AMazeGenerator::MoveRoomOnGrid(FRoomData* Tile, FVector2D NewGridPos)
 	Tile->Corners.MinY = Tile->GridPos.Y - (RoomWidth / 2);
 	Tile->Corners.MaxY = Tile->GridPos.Y + (RoomWidth / 2);
 
+	for (int X = Tile->Corners.MinX; X <= Tile->Corners.MaxX; X++)
+	{
+		for (int Y = Tile->Corners.MinY; Y <= Tile->Corners.MaxY; Y++)
+		{
+			Grid[X][Y].Add(Tile);
+
+			if (bDebug)
+			{
+				if (Grid[X][Y].Num() > 1)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("Room overlap detected at %i %i"), X, Y)
+
+					for (auto& Room : Grid[X][Y])
+					{
+						UE_LOG(LogTemp, Warning, TEXT("%i with ID: %i , %i with ID: %i"), Room->RoomType, Room->Id, Room->RoomType, Room->Id)
+					}
+				}
+			}
+		}
+	}
 	return true;
 }
 

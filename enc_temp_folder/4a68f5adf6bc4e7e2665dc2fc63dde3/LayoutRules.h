@@ -31,16 +31,6 @@ public:
 		MinY = 0;
 		MaxY = 0;
 	}
-
-	int32 Length() const
-	{
-		return MaxX - MinX;
-	}
-
-	int32 Width() const
-	{
-		return MaxY - MinY;
-	}
 };
 
 UENUM(BlueprintType)
