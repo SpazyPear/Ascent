@@ -98,4 +98,5 @@ public:
 
 	UPROPERTY(EditAnywhere)
 		TMap<ERoomType, float> RoomTypeWeights;
+
 };

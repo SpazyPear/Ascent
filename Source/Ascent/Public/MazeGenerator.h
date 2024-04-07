@@ -8,6 +8,51 @@
 #include "Delauney.h"
 #include "MazeGenerator.generated.h"
 
+class FPathCell
+{
+public:
+	FPathCell() 
+	{
+		IsWalkable = true;
+	}
+
+	FPathCell(FVector2D InGridPos, bool InIsWalkable)
+	{
+		GridPos = InGridPos;
+		IsWalkable = InIsWalkable;
+	}
+
+	FVector2D GridPos;
+	bool IsWalkable;
+};
+
+class FLinkData
+{
+public:
+
+	FLinkData()
+	{
+
+	}
+
+	FLinkData(FRoomData* A, FRoomData* B)
+	{
+		RoomA = A;
+		RoomB = B;
+	}
+
+	FRoomData* RoomA;
+	FRoomData* RoomB;
+
+	TArray<FVector2D> Path;
+	TArray<FVector> WorldPath;
+
+	bool operator=(FLinkData const& B) const
+	{
+		return (RoomA == B.RoomA || B.RoomB) && (RoomB == B.RoomB || RoomA == B.RoomA);
+	}
+};
+
 class FRoomData
 {
 public:
@@ -22,6 +67,7 @@ public:
 	FVector Position;
 	F2DRange Corners;
 	int32 Id;
+	TArray<FRoomData*> Neighbours;
 
 	friend FORCEINLINE uint32 GetTypeHash(const FRoomData& s)
 	{
@@ -181,15 +227,17 @@ public:
 private:
 
 	TArray<FDEdge> Corridors;
-	TArray<FRoomData*> RoomDataCollection;
+	TArray<FRoomData> CachedRoomDataCollection;
 
 	void PlacePoints(TArray<FDPoint>& Points);
 	void TriangulateLinks(TArray<FDPoint>& Points, OUT TMap<FDPoint, TArray<FDPoint>>& Adjacencies);
-	void DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Adjacencies);
+	void DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Adjacencies, OUT TArray<FRoomData> RoomDataCollection);
 	bool CollapseNeighbours(FRoomTile& Tile, uint8& bCollapsed);
 	bool ForcePlaceRoom(ERoomType RoomType, TArray<FRoomTile>& RoomTiles, uint8& CollapsedRooms, uint8& CollapsedIndex);
-	void SizeRooms();
-	bool MoveRoomOnGrid(FRoomData* Tile, FVector2D NewGridPos);
+	void SizeRooms(TArray<FRoomData> RoomDataCollection);
+	bool MoveRoomOnGrid(FRoomData& Tile, FVector2D NewGridPos);
 	int32 RoundToOdd(int32 Value);
-	void BuildLinks();
+	bool IsRoomsConnected(const TArray<FRoomTile>& Rooms);
+	void BuildLinks(TArray<FRoomData>& Rooms);
+	void PopulateLinkPath(FLinkData& Link, Grid<FPathCell>& Grid);
 };
