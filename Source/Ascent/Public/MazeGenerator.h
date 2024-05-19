@@ -16,15 +16,25 @@ public:
 		IsWalkable = true;
 	}
 
-	FPathCell(FVector2D InGridPos, bool InIsWalkable)
+	FPathCell(FIntPoint InGridPos, bool InIsWalkable)
 	{
 		GridPos = InGridPos;
 		IsWalkable = InIsWalkable;
 	}
 
-	FVector2D GridPos;
+	FIntPoint GridPos;
 	bool IsWalkable;
+	float hCost;
+	float gCost;
+	FPathCell* Parent;
+
+	float fCost()
+	{
+		return hCost + gCost;
+	}
 };
+
+class FRoomData;
 
 class FLinkData
 {
@@ -44,10 +54,10 @@ public:
 	FRoomData* RoomA;
 	FRoomData* RoomB;
 
-	TArray<FVector2D> Path;
+	TArray<FIntPoint> Path;
 	TArray<FVector> WorldPath;
 
-	bool operator=(FLinkData const& B) const
+	bool operator==(FLinkData const& B) const
 	{
 		return (RoomA == B.RoomA || B.RoomB) && (RoomB == B.RoomB || RoomA == B.RoomA);
 	}
@@ -63,7 +73,7 @@ public:
 	}
 
 	ERoomType RoomType;
-	FVector2D GridPos;
+	FIntPoint GridPos;
 	FVector Position;
 	F2DRange Corners;
 	int32 Id;
@@ -84,12 +94,12 @@ public:
 	TArray<ERoomType> PossibleRoomTypes;
 	float Entropy;
 	bool bCollapsed;
-	FVector2D GridPos;
+	FIntPoint GridPos;
 	FLayoutRules* LayoutRules;
 
 	FRoomTile() { }
 
-	FRoomTile(int32 Id, FVector2D GridPos, FLayoutRules* InLayoutRules)
+	FRoomTile(int32 Id, FIntPoint GridPos, FLayoutRules* InLayoutRules)
 	{
 		this->Id = Id;
 		this->LayoutRules = InLayoutRules;
@@ -231,11 +241,11 @@ private:
 
 	void PlacePoints(TArray<FDPoint>& Points);
 	void TriangulateLinks(TArray<FDPoint>& Points, OUT TMap<FDPoint, TArray<FDPoint>>& Adjacencies);
-	void DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Adjacencies, OUT TArray<FRoomData> RoomDataCollection);
+	void DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Adjacencies, OUT TArray<FRoomData>& RoomDataCollection);
 	bool CollapseNeighbours(FRoomTile& Tile, uint8& bCollapsed);
 	bool ForcePlaceRoom(ERoomType RoomType, TArray<FRoomTile>& RoomTiles, uint8& CollapsedRooms, uint8& CollapsedIndex);
 	void SizeRooms(TArray<FRoomData> RoomDataCollection);
-	bool MoveRoomOnGrid(FRoomData& Tile, FVector2D NewGridPos);
+	bool MoveRoomOnGrid(FRoomData& Tile, FIntPoint NewGridPos);
 	int32 RoundToOdd(int32 Value);
 	bool IsRoomsConnected(const TArray<FRoomTile>& Rooms);
 	void BuildLinks(TArray<FRoomData>& Rooms);

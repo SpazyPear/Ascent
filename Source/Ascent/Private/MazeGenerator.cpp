@@ -3,6 +3,8 @@
 
 #include "MazeGenerator.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Math/UnrealMathUtility.h"
+
 
 // Sets default values
 AMazeGenerator::AMazeGenerator()
@@ -159,7 +161,7 @@ void AMazeGenerator::TriangulateLinks(TArray<FDPoint>& Points, OUT TMap<FDPoint,
 
 #pragma region Room Typing
 
-void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& RoomAdjacency, OUT TArray<FRoomData> RoomDataCollection)
+void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& RoomAdjacency, OUT TArray<FRoomData>& RoomDataCollection)
 {
 	// Use wave function collapse to determine room types
 
@@ -176,7 +178,7 @@ void AMazeGenerator::DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Ro
 
 		for (const auto& Point : RoomAdjacency)
 		{
-			RoomTiles[Point.Key.Id] = FRoomTile(Point.Key.Id, FVector2D(Point.Key.X, Point.Key.Y), &LayoutRules);
+			RoomTiles[Point.Key.Id] = FRoomTile(Point.Key.Id, FIntPoint(Point.Key.X, Point.Key.Y), &LayoutRules);
 		}
 
 		// Assign adjacancies to room tiles
@@ -452,7 +454,7 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 	uint32 GridLength = Length;
 	uint32 GridWidth = Width;
 
-	FVector2D AveragePos = FVector2D::ZeroVector;
+	FIntPoint AveragePos = FIntPoint::ZeroVector;
 	for (auto& Room : RoomDataCollection)
 	{
 		AveragePos += Room.GridPos;
@@ -461,7 +463,7 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 
 	// Sort by closest to the middle of the clump
 	RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
-		return FVector2D::Distance(A.GridPos, AveragePos) < FVector2D::Distance(B.GridPos, AveragePos);
+		return FIntPoint::Distance(A.GridPos, AveragePos) < FIntPoint::Distance(B.GridPos, AveragePos);
 		});
 
 
@@ -495,10 +497,10 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 					int TranslationX = ((MaxLength) - FMath::Abs(XDistance)) * FMath::Sign(XDistance);
 					int TranslationY = ((MaxWidth) - FMath::Abs(YDistance)) * FMath::Sign(YDistance);
 
-					MoveRoomOnGrid(RoomTwo, RoomTwo.GridPos + FVector2D(TranslationX, TranslationY));
+					MoveRoomOnGrid(RoomTwo, RoomTwo.GridPos + FIntPoint(TranslationX, TranslationY));
 
 					RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
-						return FVector2D::Distance(A.GridPos, AveragePos) < FVector2D::Distance(B.GridPos, AveragePos);
+						return FIntPoint::Distance(A.GridPos, AveragePos) < FIntPoint::Distance(B.GridPos, AveragePos);
 						});
 						
 				}
@@ -538,7 +540,7 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 	}
 }
 
-bool AMazeGenerator::MoveRoomOnGrid(FRoomData& Tile, FVector2D NewGridPos)
+bool AMazeGenerator::MoveRoomOnGrid(FRoomData& Tile, FIntPoint NewGridPos)
 {
 	uint32 RoomLength = Tile.Corners.MaxX - Tile.Corners.MinX;
 	uint32 RoomWidth = Tile.Corners.MaxY - Tile.Corners.MinY;
@@ -600,8 +602,55 @@ void AMazeGenerator::BuildLinks(TArray<FRoomData>& RoomDataCollection)
 
 void AMazeGenerator::PopulateLinkPath(FLinkData& Link, Grid<FPathCell>& Grid) 
 {
+	TArray<FIntPoint> Directions = { FIntPoint(1,0), FIntPoint(1,1), FIntPoint(0, 1), FIntPoint(-1, 1), FIntPoint(-1, 0), FIntPoint(-1,-1), FIntPoint(0, -1), FIntPoint(1, -1) };
+	TMap<FIntPoint, TArray<FIntPoint>> ValidDirections = { 
+		{ FIntPoint(0, -1), TArray<FIntPoint> { FIntPoint(-1, 0), FIntPoint(-1, -1), FIntPoint(0, -1), FIntPoint(1, -1), FIntPoint(1, 0)} },
+
+	};
 	// Jump Point Search algorithm to find the shortest path between two rooms
+	FIntPoint StartPoint = Link.RoomA->GridPos - (Link.RoomA->Corners.MaxX / 2 - Link.RoomA->Corners.MaxY / 2);
+	FIntPoint EndPoint = Link.RoomB->GridPos - (Link.RoomB->Corners.MaxX / 2 - Link.RoomB->Corners.MaxY / 2);
+	FPathCell& StartNode = Grid[StartPoint.X][StartPoint.Y];
+	FPathCell& EndNode = Grid[EndPoint.X][EndPoint.Y];
+	TArray<FPathCell&> OpenList;
+	OpenList.Add(StartNode);
+
+	while (OpenList.Num() > 0)
+	{
+		FPathCell& CurNode = GetLowestCostCell(OpenList);
+		FPathCell* ParentNode = CurNode.Parent;
+
+		if (CurNode.GridPos == EndNode.GridPos)
+		{
+			//return Link.Path;
+		}
+
+		OpenList.Remove(CurNode);
+		FIntPoint MovingDirection = ParentNode == nullptr ? GetGeneralDirection(CurNode.GridPos, EndNode.GridPos) : GetGeneralDirection(ParentNode->GridPos, CurNode.GridPos);
+
+	}
 	
+}
+
+int32 GetGeneralDirection(FIntPoint A, FIntPoint B)
+{
+	FVector2D Vec = B - A;
+	float Angle = FMath::Atan2(Vec.Y, Vec.X);
+	int32 Octant = FMath::RoundToInt(8 * Angle / (2 * PI) + 8) % 8;
+	return Octant;
+}
+
+FPathCell& GetLowestCostCell(TArray<FPathCell&>& OpenList)
+{
+	FPathCell* CurMin = nullptr;
+	for (FPathCell& Cell : OpenList)
+	{
+		if (CurMin == nullptr || Cell.fCost() < CurMin->fCost())
+		{
+			CurMin = &Cell;
+		}
+	}
+	return *CurMin;
 }
 
 #pragma endregion	
