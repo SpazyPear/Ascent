@@ -8,7 +8,7 @@
 #include "Delauney.h"
 #include "MazeGenerator.generated.h"
 
-class FPathCell
+struct FPathCell
 {
 public:
 	FPathCell() 
@@ -32,6 +32,8 @@ public:
 	{
 		return hCost + gCost;
 	}
+
+
 };
 
 class FRoomData;
@@ -59,7 +61,7 @@ public:
 
 	bool operator==(FLinkData const& B) const
 	{
-		return (RoomA == B.RoomA || B.RoomB) && (RoomB == B.RoomB || RoomA == B.RoomA);
+		return (RoomA == B.RoomA && RoomB == B.RoomB) || (RoomA == B.RoomB && RoomB == B.RoomA);
 	}
 };
 
@@ -84,6 +86,10 @@ public:
 		return s.Id;
 	}
 
+	bool operator== (const FRoomData& B) const
+	{
+		GridPos == B.GridPos;
+	}
 };
 
 class FRoomTile
@@ -139,33 +145,37 @@ public:
 	}
 };
 
-template <typename T> class Grid
+class Grid
 {
-	typedef T* iterator;
-	typedef const T* const_iterator;
+	typedef FPathCell* iterator;
+	typedef const FPathCell* const_iterator;
 	uint32 Width;
 	uint32 Length;
 
-	T* Arr;
+	FPathCell** Arr;
 
 public:
 
-	iterator begin() { return &Arr[0]; }
-	const_iterator begin() const { return &Arr[0]; }
-	iterator end() { return &Arr[Width * Length]; }
-	const_iterator end() const { return &Arr[Length * Width]; }
+	iterator begin() { return Arr[0]; }
+	const_iterator begin() const { return Arr[0]; }
+	iterator end() { return Arr[Width * Length]; }
+	const_iterator end() const { return Arr[Length * Width]; }
 
 	Grid() {}
 
 	Grid(uint32 L, uint32 W)
 	{
-		Length = W;
+		Length = L;
 		Width = W;
-		Arr = new T[L * W];
-		//for (uint32 X = 0; X < L * W; X++)
-		//{
-		//	Arr[X] = new T();
-		//}
+		Arr = new FPathCell*[L];
+		for (uint32 X = 0; X < L; X++)
+		{
+			Arr[X] = new FPathCell[W];
+			for (uint32 Y = 0; Y < W; Y++)
+			{
+				Arr[X][Y].GridPos = FIntPoint(X, Y);
+			}
+		}
 	}
 
 	~Grid()
@@ -173,20 +183,14 @@ public:
 		delete[] Arr;
 	}
 
-	uint32 GetLength(uint8 Axis) const
+	int32 GetLength(uint8 Axis) const
 	{
 		return Axis == 0 ? Length : Width;
 	}
 
-	T& ElementAt(uint32 X, uint32 Y) const
+	FPathCell* operator[](uint32 const& X) const
 	{
-		if (X >= Length || X < 0 || Y >= Width || Y < 0) return nullptr;
-		return Arr[X][Y];
-	}
-
-	T* operator[](uint32 const& X) const
-	{
-		return &Arr[X * Width];
+		return Arr[X];
 	}
 };
 
@@ -244,10 +248,10 @@ private:
 	void DetermineRoomTypes(const TMap<FDPoint, TArray<FDPoint>>& Adjacencies, OUT TArray<FRoomData>& RoomDataCollection);
 	bool CollapseNeighbours(FRoomTile& Tile, uint8& bCollapsed);
 	bool ForcePlaceRoom(ERoomType RoomType, TArray<FRoomTile>& RoomTiles, uint8& CollapsedRooms, uint8& CollapsedIndex);
-	void SizeRooms(TArray<FRoomData> RoomDataCollection);
+	void SizeRooms(TArray<FRoomData>& RoomDataCollection);
 	bool MoveRoomOnGrid(FRoomData& Tile, FIntPoint NewGridPos);
 	int32 RoundToOdd(int32 Value);
 	bool IsRoomsConnected(const TArray<FRoomTile>& Rooms);
 	void BuildLinks(TArray<FRoomData>& Rooms);
-	void PopulateLinkPath(FLinkData& Link, Grid<FPathCell>& Grid);
+	void PopulateLinkPath(FLinkData& Link, Grid& Grid);
 };

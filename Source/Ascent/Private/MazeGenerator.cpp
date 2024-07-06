@@ -1,10 +1,126 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "MazeGenerator.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Math/UnrealMathUtility.h"
+#include "Algo/Reverse.h"
 
+bool operator==(const FPathCell A, const FPathCell* B)
+{
+	return A.GridPos == B->GridPos;
+}
+
+bool operator==(const FPathCell A, const FPathCell& B)
+{
+	return A.GridPos == B.GridPos;
+}
+
+#pragma region Pathfinding Helpers
+
+double Distance(FIntPoint A, FIntPoint B)
+{
+	return FMath::Sqrt((double)FMath::Square(B.X - A.X) + FMath::Square(B.Y - B.X));
+}
+
+TArray<FIntPoint> ConstructPath(FPathCell& End)
+{
+	TArray<FIntPoint> Points;
+	FPathCell* SearchNode = &End;
+	while (SearchNode)
+	{
+		Points.Add(SearchNode->GridPos);
+
+		if (SearchNode->Parent != NULL)
+		{
+			FIntPoint StartPos = SearchNode->GridPos;
+			FIntPoint Dist = Distance(SearchNode->Parent->GridPos, SearchNode->GridPos);
+			int32 MaxDimension = FMath::Max(FMath::Abs(Dist.X), FMath::Abs(Dist.Y));
+			Dist.X = FMath::Clamp(Dist.X, -1, 1);
+			Dist.Y = FMath::Clamp(Dist.Y, -1, 1);
+			for (int x = 0; x < MaxDimension - 1; x++)
+			{
+				Points.Add(StartPos += Dist);
+			}
+		}
+
+		SearchNode = SearchNode->Parent;
+	}
+	Algo::Reverse(Points);
+	Points.RemoveAt(0);
+	return Points;
+}
+
+bool IsValidPoint(FIntPoint A, const Grid& PathGrid)
+{
+	return A.X >= 0 && A.X < PathGrid.GetLength(0) && A.Y >= 0 && A.Y < PathGrid.GetLength(1);
+}
+
+FPathCell* GetNeighbour(FIntPoint A, FIntPoint Direction, int32 Distance, const Grid& PathGrid)
+{
+	FIntPoint Vec = A + (Direction * Distance);
+	if (IsValidPoint(A, PathGrid)) return &PathGrid[A.X][A.Y];
+	return nullptr;
+}
+
+int32 DistanceToWall(FPathCell& End, FIntPoint Direction, const Grid& PathGrid)
+{
+	int32 Distance = 0;
+	FPathCell* SearchNode = &End;
+	while (SearchNode)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("dist"))
+
+		SearchNode = GetNeighbour(SearchNode->GridPos, Direction, 1, PathGrid);
+		if (SearchNode == nullptr || !SearchNode->IsWalkable) break;
+		Distance++;
+	}
+	return Distance;
+}
+
+bool IsInExactDirection(FIntPoint A, FIntPoint B, FIntPoint Direction)
+{
+	int32 X = FMath::Clamp(B.X - A.X, -1, 1);
+	int32 Y = FMath::Clamp(B.Y - A.Y, -1, 1);
+	return Direction == FIntPoint(X, Y);
+}
+
+bool IsCardinal(FIntPoint Direction)
+{
+	bool Vertical = Direction.X == 1;
+	bool Horizontal = Direction.Y == 1;
+	return Vertical ^ Horizontal;
+}
+
+bool IsDiagonal(FIntPoint Direction)
+{
+	return Direction.X != 0 && Direction.Y != 0;
+}
+
+FIntPoint GetGeneralDirection(FIntPoint A, FIntPoint B)
+{
+	TArray<FIntPoint> Directions = { FIntPoint(1,0), FIntPoint(1,1), FIntPoint(0, 1), FIntPoint(-1, 1), FIntPoint(-1, 0), FIntPoint(-1,-1), FIntPoint(0, -1), FIntPoint(1, -1) };
+
+	FVector2D Vec = B - A;
+	float Angle = FMath::Atan2(Vec.Y, Vec.X);
+	int32 Octant = FMath::RoundToInt(8 * Angle / (2 * PI) + 8) % 8;
+
+	return Directions[Octant];
+}
+
+FPathCell& GetLowestCostCell(TArray<FPathCell>& OpenList)
+{
+	FPathCell* CurMin = nullptr;
+	for (FPathCell& Cell : OpenList)
+	{
+		if (CurMin == nullptr || Cell.fCost() < CurMin->fCost())
+		{
+			CurMin = &Cell;
+		}
+	}
+	return *CurMin;
+}
+
+#pragma endregion
 
 // Sets default values
 AMazeGenerator::AMazeGenerator()
@@ -433,7 +549,7 @@ bool AMazeGenerator::CollapseNeighbours(FRoomTile& Tile, uint8& CollapsedRooms)
 
 #pragma region Sizing
 
-void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
+void AMazeGenerator::SizeRooms(TArray<FRoomData>& RoomDataCollection)
 {
 	UE_LOG(LogTemp, Warning, TEXT("Initial set"))
 		// Assign room sizes
@@ -454,7 +570,7 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 	uint32 GridLength = Length;
 	uint32 GridWidth = Width;
 
-	FIntPoint AveragePos = FIntPoint::ZeroVector;
+	FIntPoint AveragePos = FIntPoint::ZeroValue;
 	for (auto& Room : RoomDataCollection)
 	{
 		AveragePos += Room.GridPos;
@@ -463,7 +579,7 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 
 	// Sort by closest to the middle of the clump
 	RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
-		return FIntPoint::Distance(A.GridPos, AveragePos) < FIntPoint::Distance(B.GridPos, AveragePos);
+		return Distance(A.GridPos, AveragePos) < Distance(B.GridPos, AveragePos);
 		});
 
 
@@ -500,7 +616,7 @@ void AMazeGenerator::SizeRooms(TArray<FRoomData> RoomDataCollection)
 					MoveRoomOnGrid(RoomTwo, RoomTwo.GridPos + FIntPoint(TranslationX, TranslationY));
 
 					RoomDataCollection.Sort([AveragePos](const FRoomData& A, const FRoomData& B) {
-						return FIntPoint::Distance(A.GridPos, AveragePos) < FIntPoint::Distance(B.GridPos, AveragePos);
+						return Distance(A.GridPos, AveragePos) < Distance(B.GridPos, AveragePos);
 						});
 						
 				}
@@ -591,66 +707,111 @@ void AMazeGenerator::BuildLinks(TArray<FRoomData>& RoomDataCollection)
 		}
 	}
 
-	Grid<FPathCell> PathGrid = Grid<FPathCell>(Length, Width); // Rooms can be pushed out of bounds of this
+	Grid PathGrid = Grid(Length, Width); // Rooms can be pushed out of bounds of this
 	
-
 	for (auto& Link : Links)
 	{
 		PopulateLinkPath(Link, PathGrid);
+
+		if (bDebug)
+		{
+			FIntPoint Prev = FIntPoint::ZeroValue;
+			for (FIntPoint Point : Link.Path)
+			{
+				if (Prev == FIntPoint::ZeroValue) continue;
+
+				UKismetSystemLibrary::DrawDebugLine(
+					this
+					, FVector(Point.X * CellSize, Point.Y * CellSize, 0.f)
+					, FVector(Prev.X * CellSize, Prev.Y * CellSize, 0.f)
+					, FColor::Emerald
+					, 500.f
+					, 16.f
+				);
+				Prev = Point;
+			}
+		}
 	}
 }
 
-void AMazeGenerator::PopulateLinkPath(FLinkData& Link, Grid<FPathCell>& Grid) 
+// Jump Point Search algorithm to find the shortest path between two rooms
+void AMazeGenerator::PopulateLinkPath(FLinkData& Link, Grid& PathGrid) 
 {
-	TArray<FIntPoint> Directions = { FIntPoint(1,0), FIntPoint(1,1), FIntPoint(0, 1), FIntPoint(-1, 1), FIntPoint(-1, 0), FIntPoint(-1,-1), FIntPoint(0, -1), FIntPoint(1, -1) };
 	TMap<FIntPoint, TArray<FIntPoint>> ValidDirections = { 
 		{ FIntPoint(0, -1), TArray<FIntPoint> { FIntPoint(-1, 0), FIntPoint(-1, -1), FIntPoint(0, -1), FIntPoint(1, -1), FIntPoint(1, 0)} },
-
+		{ FIntPoint(1, -1), TArray<FIntPoint> { FIntPoint(0, -1), FIntPoint(1, -1), FIntPoint(1, 0) } },
+		{ FIntPoint(1, 0), TArray<FIntPoint> { FIntPoint(0, -1), FIntPoint(1, -1), FIntPoint(1, 0), FIntPoint(1, 1), FIntPoint(0, 1) } },
+		{ FIntPoint(1, 1), TArray<FIntPoint> { FIntPoint(1, 0), FIntPoint(1, 1), FIntPoint(0, 1) } },
+		{ FIntPoint(0, 1), TArray<FIntPoint> { FIntPoint(1, 0), FIntPoint(1, 1), FIntPoint(0, 1), FIntPoint(-1, 1), FIntPoint(-1, 0) }},
+		{ FIntPoint(-1, 1), TArray<FIntPoint> { FIntPoint(0, 1), FIntPoint(-1, 1), FIntPoint(-1, 0)}},
+		{ FIntPoint(-1, 0), TArray<FIntPoint> { FIntPoint(0, 1), FIntPoint(-1, 1), FIntPoint(-1, 0), FIntPoint(-1, -1), FIntPoint(0, -1) } },
+		{ FIntPoint(-1, -1), TArray<FIntPoint> { FIntPoint(-1, 0), FIntPoint(-1, -1), FIntPoint(0, -1)} }
 	};
-	// Jump Point Search algorithm to find the shortest path between two rooms
-	FIntPoint StartPoint = Link.RoomA->GridPos - (Link.RoomA->Corners.MaxX / 2 - Link.RoomA->Corners.MaxY / 2);
-	FIntPoint EndPoint = Link.RoomB->GridPos - (Link.RoomB->Corners.MaxX / 2 - Link.RoomB->Corners.MaxY / 2);
-	FPathCell& StartNode = Grid[StartPoint.X][StartPoint.Y];
-	FPathCell& EndNode = Grid[EndPoint.X][EndPoint.Y];
-	TArray<FPathCell&> OpenList;
+
+	FIntPoint StartPoint = Link.RoomA->GridPos;
+	FIntPoint EndPoint = Link.RoomB->GridPos;
+	FPathCell StartNode = PathGrid[StartPoint.X][StartPoint.Y];
+	FPathCell EndNode = PathGrid[EndPoint.X][EndPoint.Y];
+	TArray<FPathCell> OpenList;
 	OpenList.Add(StartNode);
 
 	while (OpenList.Num() > 0)
 	{
-		FPathCell& CurNode = GetLowestCostCell(OpenList);
+		FPathCell CurNode = GetLowestCostCell(OpenList);
 		FPathCell* ParentNode = CurNode.Parent;
-
+		UE_LOG(LogTemp, Warning, TEXT("%i, %i"), CurNode.GridPos.X, CurNode.GridPos.Y)
 		if (CurNode.GridPos == EndNode.GridPos)
 		{
-			//return Link.Path;
+			Link.Path = ConstructPath(EndNode);
+			return;
 		}
 
 		OpenList.Remove(CurNode);
 		FIntPoint MovingDirection = ParentNode == nullptr ? GetGeneralDirection(CurNode.GridPos, EndNode.GridPos) : GetGeneralDirection(ParentNode->GridPos, CurNode.GridPos);
-
-	}
-	
-}
-
-int32 GetGeneralDirection(FIntPoint A, FIntPoint B)
-{
-	FVector2D Vec = B - A;
-	float Angle = FMath::Atan2(Vec.Y, Vec.X);
-	int32 Octant = FMath::RoundToInt(8 * Angle / (2 * PI) + 8) % 8;
-	return Octant;
-}
-
-FPathCell& GetLowestCostCell(TArray<FPathCell&>& OpenList)
-{
-	FPathCell* CurMin = nullptr;
-	for (FPathCell& Cell : OpenList)
-	{
-		if (CurMin == nullptr || Cell.fCost() < CurMin->fCost())
+		for (FIntPoint Direction : ValidDirections[MovingDirection])
 		{
-			CurMin = &Cell;
+			double GCost = 0.0;
+			FPathCell* NewSuccesor = nullptr;
+			UE_LOG(LogTemp, Warning, TEXT("Is cardinal %i, Is diagonal %i, Is in exact direction %i, Distance %f, Distance to wall %f"), IsCardinal(Direction), IsDiagonal(Direction), IsInExactDirection(CurNode.GridPos, EndNode.GridPos, Direction), Distance(CurNode.GridPos, EndNode.GridPos), DistanceToWall(CurNode, Direction, PathGrid))
+			if (IsCardinal(Direction) && IsInExactDirection(CurNode.GridPos, EndNode.GridPos, Direction) && Distance(CurNode.GridPos, EndNode.GridPos) <= DistanceToWall(CurNode, Direction, PathGrid))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("1"))
+				NewSuccesor = &EndNode;
+				GCost = CurNode.gCost + (Distance(CurNode.GridPos, EndNode.GridPos));
+			}
+			else if (IsDiagonal(Direction) && IsInExactDirection(CurNode.GridPos, EndNode.GridPos, Direction) && (CurNode.GridPos.X - EndNode.GridPos.X <= DistanceToWall(CurNode, Direction, PathGrid) || CurNode.GridPos.Y - EndNode.GridPos.Y <= DistanceToWall(CurNode, Direction, PathGrid)))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("2"))
+				double MinDiff = FMath::Min(FMath::Abs(CurNode.GridPos.X - EndNode.GridPos.X), FMath::Abs(CurNode.GridPos.Y - EndNode.GridPos.Y));
+				NewSuccesor = GetNeighbour(CurNode.GridPos, Direction, MinDiff, PathGrid);
+				GCost = CurNode.gCost + FMath::Sqrt(MinDiff);
+			}
+			else if (DistanceToWall(CurNode, Direction, PathGrid) > 0)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("3"))
+				NewSuccesor = GetNeighbour(CurNode.GridPos, Direction, 1, PathGrid);
+				GCost = Distance(CurNode.GridPos, NewSuccesor->GridPos);
+				if (IsDiagonal(Direction)) GCost = FMath::Sqrt(GCost);
+				else GCost += CurNode.gCost;
+			}
+
+			if (NewSuccesor != nullptr)
+			{
+				if (GCost < NewSuccesor->gCost)
+				{
+					NewSuccesor->Parent = &CurNode;
+					NewSuccesor->gCost = GCost;
+					NewSuccesor->hCost = Distance(EndNode.GridPos, NewSuccesor->GridPos);
+
+					if (!OpenList.Contains(NewSuccesor))
+					{
+						OpenList.Add(*NewSuccesor);
+					}
+				}
+			}
 		}
 	}
-	return *CurMin;
+
 }
 
 #pragma endregion	
