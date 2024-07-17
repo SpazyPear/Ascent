@@ -24,16 +24,14 @@ public:
 
 	FIntPoint GridPos;
 	bool IsWalkable;
-	float hCost;
-	float gCost;
+	double hCost;
+	double gCost;
 	FPathCell* Parent;
 
-	float fCost()
+	double fCost()
 	{
 		return hCost + gCost;
 	}
-
-
 };
 
 class FRoomData;
@@ -174,13 +172,17 @@ public:
 			for (uint32 Y = 0; Y < W; Y++)
 			{
 				Arr[X][Y].GridPos = FIntPoint(X, Y);
+				Arr[X][Y].gCost = INFINITY;
 			}
 		}
 	}
 
 	~Grid()
 	{
-		delete[] Arr;
+		for (uint32 X = 0; X < Length; X++)
+		{
+			delete[] Arr[X];
+		}
 	}
 
 	int32 GetLength(uint8 Axis) const

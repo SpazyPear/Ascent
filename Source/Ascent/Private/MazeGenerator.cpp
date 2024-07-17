@@ -19,7 +19,11 @@ bool operator==(const FPathCell A, const FPathCell& B)
 
 double Distance(FIntPoint A, FIntPoint B)
 {
-	return FMath::Sqrt((double)FMath::Square(B.X - A.X) + FMath::Square(B.Y - B.X));
+	double X = FMath::Square(B.X - A.X);
+	double Y = FMath::Square(B.Y - A.Y);
+	double C = FMath::Sqrt(X + Y);
+	return C;
+	//return FMath::Sqrt((double)FMath::Square(B.X - A.X) + FMath::Square(B.Y - A.Y));
 }
 
 TArray<FIntPoint> ConstructPath(FPathCell& End)
@@ -30,7 +34,7 @@ TArray<FIntPoint> ConstructPath(FPathCell& End)
 	{
 		Points.Add(SearchNode->GridPos);
 
-		if (SearchNode->Parent != NULL)
+		if (SearchNode->Parent != nullptr)
 		{
 			FIntPoint StartPos = SearchNode->GridPos;
 			FIntPoint Dist = Distance(SearchNode->Parent->GridPos, SearchNode->GridPos);
@@ -58,7 +62,7 @@ bool IsValidPoint(FIntPoint A, const Grid& PathGrid)
 FPathCell* GetNeighbour(FIntPoint A, FIntPoint Direction, int32 Distance, const Grid& PathGrid)
 {
 	FIntPoint Vec = A + (Direction * Distance);
-	if (IsValidPoint(A, PathGrid)) return &PathGrid[A.X][A.Y];
+	if (IsValidPoint(Vec, PathGrid)) return &PathGrid[Vec.X][Vec.Y];
 	return nullptr;
 }
 
@@ -68,8 +72,6 @@ int32 DistanceToWall(FPathCell& End, FIntPoint Direction, const Grid& PathGrid)
 	FPathCell* SearchNode = &End;
 	while (SearchNode)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("dist"))
-
 		SearchNode = GetNeighbour(SearchNode->GridPos, Direction, 1, PathGrid);
 		if (SearchNode == nullptr || !SearchNode->IsWalkable) break;
 		Distance++;
@@ -107,17 +109,17 @@ FIntPoint GetGeneralDirection(FIntPoint A, FIntPoint B)
 	return Directions[Octant];
 }
 
-FPathCell& GetLowestCostCell(TArray<FPathCell>& OpenList)
+FPathCell* GetLowestCostCell(TArray<FPathCell*>& OpenList)
 {
 	FPathCell* CurMin = nullptr;
-	for (FPathCell& Cell : OpenList)
+	for (FPathCell* Cell : OpenList)
 	{
-		if (CurMin == nullptr || Cell.fCost() < CurMin->fCost())
+		if (CurMin == nullptr || Cell->fCost() < CurMin->fCost())
 		{
-			CurMin = &Cell;
+			CurMin = Cell;
 		}
 	}
-	return *CurMin;
+	return CurMin;
 }
 
 #pragma endregion
@@ -718,13 +720,13 @@ void AMazeGenerator::BuildLinks(TArray<FRoomData>& RoomDataCollection)
 			FIntPoint Prev = FIntPoint::ZeroValue;
 			for (FIntPoint Point : Link.Path)
 			{
-				if (Prev == FIntPoint::ZeroValue) continue;
+				//if (Prev == FIntPoint::ZeroValue) continue;
 
 				UKismetSystemLibrary::DrawDebugLine(
 					this
 					, FVector(Point.X * CellSize, Point.Y * CellSize, 0.f)
 					, FVector(Prev.X * CellSize, Prev.Y * CellSize, 0.f)
-					, FColor::Emerald
+					, FColor::Cyan
 					, 500.f
 					, 16.f
 				);
@@ -750,62 +752,71 @@ void AMazeGenerator::PopulateLinkPath(FLinkData& Link, Grid& PathGrid)
 
 	FIntPoint StartPoint = Link.RoomA->GridPos;
 	FIntPoint EndPoint = Link.RoomB->GridPos;
-	FPathCell StartNode = PathGrid[StartPoint.X][StartPoint.Y];
-	FPathCell EndNode = PathGrid[EndPoint.X][EndPoint.Y];
-	TArray<FPathCell> OpenList;
-	OpenList.Add(StartNode);
+	FPathCell& StartNode = PathGrid[StartPoint.X][StartPoint.Y];
+	FPathCell& EndNode = PathGrid[EndPoint.X][EndPoint.Y];
+	StartNode.hCost = Distance(StartPoint, EndPoint);
+	StartNode.gCost = 0;
+	TArray<FPathCell*> OpenList;
+	OpenList.Add(&StartNode);
 
+	if (StartNode.GridPos == EndNode.GridPos)
+	{
+		Link.Path.Add(StartNode.GridPos);
+		Link.Path.Add(EndNode.GridPos);
+		return;
+	}
 	while (OpenList.Num() > 0)
 	{
-		FPathCell CurNode = GetLowestCostCell(OpenList);
-		FPathCell* ParentNode = CurNode.Parent;
-		UE_LOG(LogTemp, Warning, TEXT("%i, %i"), CurNode.GridPos.X, CurNode.GridPos.Y)
-		if (CurNode.GridPos == EndNode.GridPos)
+		FPathCell* CurNode = GetLowestCostCell(OpenList);
+		FPathCell* ParentNode = CurNode->Parent;
+		UE_LOG(LogTemp, Warning, TEXT("%i, %i"), CurNode->GridPos.X, CurNode->GridPos.Y)
+		if (CurNode->GridPos == EndNode.GridPos)
 		{
 			Link.Path = ConstructPath(EndNode);
 			return;
 		}
 
 		OpenList.Remove(CurNode);
-		FIntPoint MovingDirection = ParentNode == nullptr ? GetGeneralDirection(CurNode.GridPos, EndNode.GridPos) : GetGeneralDirection(ParentNode->GridPos, CurNode.GridPos);
+		FIntPoint MovingDirection = ParentNode == nullptr ? GetGeneralDirection(CurNode->GridPos, EndNode.GridPos) : GetGeneralDirection(ParentNode->GridPos, CurNode->GridPos);
+		UE_LOG(LogTemp, Warning, TEXT("Moving direction %i %i"), MovingDirection.X, MovingDirection.Y)
 		for (FIntPoint Direction : ValidDirections[MovingDirection])
 		{
 			double GCost = 0.0;
 			FPathCell* NewSuccesor = nullptr;
-			UE_LOG(LogTemp, Warning, TEXT("Is cardinal %i, Is diagonal %i, Is in exact direction %i, Distance %f, Distance to wall %f"), IsCardinal(Direction), IsDiagonal(Direction), IsInExactDirection(CurNode.GridPos, EndNode.GridPos, Direction), Distance(CurNode.GridPos, EndNode.GridPos), DistanceToWall(CurNode, Direction, PathGrid))
-			if (IsCardinal(Direction) && IsInExactDirection(CurNode.GridPos, EndNode.GridPos, Direction) && Distance(CurNode.GridPos, EndNode.GridPos) <= DistanceToWall(CurNode, Direction, PathGrid))
+			//UE_LOG(LogTemp, Warning, TEXT("Is cardinal %i, Is diagonal %i, Is in exact direction %i, Distance %f, Distance to wall %i"), IsCardinal(Direction), IsDiagonal(Direction), IsInExactDirection(CurNode->GridPos, EndNode.GridPos, Direction), Distance(CurNode->GridPos, EndNode.GridPos), DistanceToWall(CurNode, Direction, PathGrid))
+			if (IsCardinal(Direction) && IsInExactDirection(CurNode->GridPos, EndNode.GridPos, Direction) && Distance(CurNode->GridPos, EndNode.GridPos) <= DistanceToWall(*CurNode, Direction, PathGrid))
 			{
 				UE_LOG(LogTemp, Warning, TEXT("1"))
 				NewSuccesor = &EndNode;
-				GCost = CurNode.gCost + (Distance(CurNode.GridPos, EndNode.GridPos));
+				GCost = CurNode->gCost + (Distance(CurNode->GridPos, EndNode.GridPos));
 			}
-			else if (IsDiagonal(Direction) && IsInExactDirection(CurNode.GridPos, EndNode.GridPos, Direction) && (CurNode.GridPos.X - EndNode.GridPos.X <= DistanceToWall(CurNode, Direction, PathGrid) || CurNode.GridPos.Y - EndNode.GridPos.Y <= DistanceToWall(CurNode, Direction, PathGrid)))
+			else if (IsDiagonal(Direction) && IsInExactDirection(CurNode->GridPos, EndNode.GridPos, Direction) && (CurNode->GridPos.X - EndNode.GridPos.X <= DistanceToWall(*CurNode, Direction, PathGrid) || CurNode->GridPos.Y - EndNode.GridPos.Y <= DistanceToWall(*CurNode, Direction, PathGrid)))
 			{
 				UE_LOG(LogTemp, Warning, TEXT("2"))
-				double MinDiff = FMath::Min(FMath::Abs(CurNode.GridPos.X - EndNode.GridPos.X), FMath::Abs(CurNode.GridPos.Y - EndNode.GridPos.Y));
-				NewSuccesor = GetNeighbour(CurNode.GridPos, Direction, MinDiff, PathGrid);
-				GCost = CurNode.gCost + FMath::Sqrt(MinDiff);
+				double MinDiff = FMath::Min(FMath::Abs(CurNode->GridPos.X - EndNode.GridPos.X), FMath::Abs(CurNode->GridPos.Y - EndNode.GridPos.Y));
+				NewSuccesor = GetNeighbour(CurNode->GridPos, Direction, MinDiff, PathGrid);
+				GCost = CurNode->gCost + FMath::Sqrt(MinDiff);
 			}
-			else if (DistanceToWall(CurNode, Direction, PathGrid) > 0)
+			else if (DistanceToWall(*CurNode, Direction, PathGrid) > 0)
 			{
 				UE_LOG(LogTemp, Warning, TEXT("3"))
-				NewSuccesor = GetNeighbour(CurNode.GridPos, Direction, 1, PathGrid);
-				GCost = Distance(CurNode.GridPos, NewSuccesor->GridPos);
+				NewSuccesor = GetNeighbour(CurNode->GridPos, Direction, 1, PathGrid);
+				GCost = Distance(CurNode->GridPos, NewSuccesor->GridPos);
+				UE_LOG(LogTemp, Warning, TEXT("Is diaganol %i %s"), IsDiagonal(Direction), *Direction.ToString())
 				if (IsDiagonal(Direction)) GCost = FMath::Sqrt(GCost);
-				else GCost += CurNode.gCost;
+				else GCost += CurNode->gCost;
 			}
-
 			if (NewSuccesor != nullptr)
 			{
 				if (GCost < NewSuccesor->gCost)
 				{
-					NewSuccesor->Parent = &CurNode;
+					NewSuccesor->Parent = CurNode;
 					NewSuccesor->gCost = GCost;
 					NewSuccesor->hCost = Distance(EndNode.GridPos, NewSuccesor->GridPos);
-
+					UE_LOG(LogTemp, Warning, TEXT("Distance %s %s %f"), *(NewSuccesor->GridPos.ToString()), *(EndNode.GridPos.ToString()), NewSuccesor->hCost)
 					if (!OpenList.Contains(NewSuccesor))
 					{
-						OpenList.Add(*NewSuccesor);
+						OpenList.AddUnique(NewSuccesor);
 					}
 				}
 			}
