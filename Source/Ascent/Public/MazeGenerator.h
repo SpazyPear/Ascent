@@ -14,12 +14,15 @@ public:
 	FPathCell() 
 	{
 		IsWalkable = true;
+		gCost = INFINITY;
 	}
 
 	FPathCell(FIntPoint InGridPos, bool InIsWalkable)
 	{
 		GridPos = InGridPos;
 		IsWalkable = InIsWalkable;
+		gCost = INFINITY;
+		Parent = nullptr;
 	}
 
 	FIntPoint GridPos;
@@ -82,6 +85,16 @@ public:
 	friend FORCEINLINE uint32 GetTypeHash(const FRoomData& s)
 	{
 		return s.Id;
+	}
+
+	float GetWidth() const
+	{
+		return Corners.MaxX - Corners.MinX;
+	}
+
+	float GetHeight() const
+	{
+		return Corners.MaxY - Corners.MinY;
 	}
 
 	bool operator== (const FRoomData& B) const
@@ -171,8 +184,7 @@ public:
 			Arr[X] = new FPathCell[W];
 			for (uint32 Y = 0; Y < W; Y++)
 			{
-				Arr[X][Y].GridPos = FIntPoint(X, Y);
-				Arr[X][Y].gCost = INFINITY;
+				Arr[X][Y] = FPathCell(FIntPoint(X, Y), true);
 			}
 		}
 	}
@@ -183,6 +195,7 @@ public:
 		{
 			delete[] Arr[X];
 		}
+		delete[] Arr;
 	}
 
 	int32 GetLength(uint8 Axis) const
